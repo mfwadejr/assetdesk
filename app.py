@@ -47,7 +47,7 @@ def valid_totp(secret, code): return any(hmac.compare_digest(totp(secret,int(tim
 def page(title, body, user=None):
     nav = f'<span class="user">{esc(user["name"])} · {user["role"].title()}</span><a href="/logout">Log out</a>' if user else ''
     admin = '<a href="/admin">Admin</a>' if user and user['role'] in ('admin','lead') else ''
-    return f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{esc(title)} · AssetDesk</title><link rel="stylesheet" href="/static/style.css"></head><body><header><a class="brand" href="/">ASSET<span>DESK</span><small>v{APP_VERSION}</small></a><nav>{admin}{nav}</nav></header><main>{body}</main></body></html>'''
+    return f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{esc(title)} · AssetDesk</title><link rel="stylesheet" href="/static/style.css"></head><body><header><a class="brand" href="/">ASSET<span>DESK</span><small>v{APP_VERSION}</small></a><nav>{admin}{nav}</nav></header><main>{body}</main><script>document.querySelectorAll('.rename-trigger').forEach(b=>b.textContent='Edit');</script></body></html>'''
 
 class H(http.server.BaseHTTPRequestHandler):
     def send(self, body, status=200, ctype='text/html; charset=utf-8', headers=None):
@@ -94,7 +94,26 @@ class H(http.server.BaseHTTPRequestHandler):
                 person_body=person_rows or '<tr><td colspan="5" class="empty">No matching people.</td></tr>'
                 people='<section class="panel admin-panel"><h2>Personnel directory</h2><form class="filters" method="get"><input type="hidden" name="team" value="'+esc(team_filter)+'"><label>Assigned team<select name="person_team"><option value="">All teams</option>'+''.join(f'<option value="{t["id"]}" {"selected" if str(t["id"])==person_team else ""}>{esc(t["name"])}</option>' for t in teams)+'</select></label><label>Role<select name="person_role"><option value="">All roles</option><option value="admin">Admin</option><option value="lead">Team Lead</option><option value="employee">Employee</option></select></label><label>Search<input name="person_q" value="'+esc(person_q)+'" placeholder="Name or email"></label><button>Filter</button></form><form method="post" action="/admin/user" class="inlineform"><input name="name" placeholder="Full name" required><input name="email" type="email" placeholder="Email" required><input name="password" placeholder="Temporary password" required><select name="team_id">'+''.join(f'<option value="{t["id"]}">{esc(t["name"])}</option>' for t in teams)+'</select><select name="role"><option value="employee">Employee</option><option value="lead">Team Lead</option><option value="admin">Admin</option></select><button>Add person</button></form><div class="tablewrap"><table><thead><tr><th>Name</th><th>Email</th><th>Assigned team</th><th>Role</th><th></th></tr></thead><tbody>'+person_body+'</tbody></table></div></section>'
                 org_options=''.join(f'<option value="{o["id"]}">{esc(o["name"])}</option>' for o in c.execute('SELECT * FROM organizations ORDER BY name'))
-                body += orgs+asset_types+team_list+building_list+people+'<script>document.querySelectorAll("select[name=role],select[name=person_role]").forEach(s=>{if(![...s.options].some(o=>o.value==="service_lead")){let o=document.createElement("option");o.value="service_lead";o.textContent="Service Line Lead";s.appendChild(o);}});document.querySelectorAll(".rename-trigger").forEach(b=>{b.textContent="Edit";b.onclick=()=>{renameName.value=b.dataset.name;let old=document.getElementById("renameOrg");if(old)old.remove();let s=document.createElement("select");s.id="renameOrg";s.name="organization_id";s.innerHTML="'+org_options+'";s.value=b.dataset.org||"";renameForm.insertBefore(s,renameForm.querySelector(".dialog-actions"));renameForm.action="/admin/team/update/"+b.dataset.id;renameDialog.showModal();};});</script>'
+                team_list = team_list.replace('>Rename</button>', '>Edit</button>')
+                body += orgs+asset_types+team_list+building_list+people+'''<script>
+document.querySelectorAll("select[name=role],select[name=person_role]").forEach(s=>{
+  if(![...s.options].some(o=>o.value==="service_lead")){
+    const o=document.createElement("option"); o.value="service_lead"; o.textContent="Service Line Lead"; s.appendChild(o);
+  }
+});
+document.querySelectorAll(".rename-trigger").forEach(b=>{
+  b.textContent="Edit";
+  b.onclick=()=>{
+    const form=document.getElementById("renameForm");
+    const old=document.getElementById("renameOrg"); if(old) old.remove();
+    const source=document.querySelector('select[name="organization_id"]');
+    if(source){ const s=source.cloneNode(true); s.id="renameOrg"; s.name="organization_id"; s.value=b.dataset.org||""; form.insertBefore(s,form.querySelector(".dialog-actions")); }
+    document.getElementById("renameName").value=b.dataset.name;
+    form.action="/admin/team/update/"+b.dataset.id;
+    document.getElementById("renameDialog").showModal();
+  };
+});
+</script>'''
             self.send(page('Admin',body,u)); return
         if path=='/admin/user/edit' and u['role']=='admin':
             target=c.execute('SELECT * FROM users WHERE id=?',(urllib.parse.parse_qs(p.query).get('id',[''])[0],)).fetchone()
