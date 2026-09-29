@@ -87,4 +87,4 @@ class H(http.server.BaseHTTPRequestHandler):
             self.redirect('/admin'); return
 
 if __name__=='__main__':
-    init(); print('AssetDesk running at http://127.0.0.1:8080'); http.server.ThreadingHTTPServer(('127.0.0.1',8080),H).serve_forever()
+    init(); print('AssetDesk running at http://0.0.0.0:8080'); http.server.ThreadingHTTPServer(('0.0.0.0',8080),H).serve_forever()
