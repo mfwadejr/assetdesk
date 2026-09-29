@@ -12,13 +12,16 @@ def db():
 def init():
     c=db(); c.executescript('''
     CREATE TABLE IF NOT EXISTS teams(id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL);
+    CREATE TABLE IF NOT EXISTS buildings(id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, code TEXT NOT NULL DEFAULT '');
     CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE NOT NULL, password TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'employee', team_id INTEGER REFERENCES teams(id), mfa INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE IF NOT EXISTS asset_types(id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, code TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1);
     CREATE TABLE IF NOT EXISTS assets(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), asset_type_id INTEGER NOT NULL REFERENCES asset_types(id), has_asset INTEGER NOT NULL DEFAULT 0, make TEXT, model TEXT, serial_number TEXT, asset_tag TEXT, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE(user_id, asset_type_id));
+    CREATE TABLE IF NOT EXISTS user_buildings(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, building_id INTEGER NOT NULL REFERENCES buildings(id) ON DELETE CASCADE, PRIMARY KEY(user_id,building_id));
     ''')
     cols=[r['name'] for r in c.execute('PRAGMA table_info(users)').fetchall()]
     if 'totp_secret' not in cols: c.execute('ALTER TABLE users ADD COLUMN totp_secret TEXT')
     if c.execute('SELECT COUNT(*) n FROM teams').fetchone()['n']==0: c.executemany('INSERT INTO teams(name) VALUES(?)',[('Operations',),('Engineering',),('Finance',),('People & Culture',)])
+    if c.execute('SELECT COUNT(*) n FROM buildings').fetchone()['n']==0: c.executemany('INSERT INTO buildings(name,code) VALUES(?,?)',[('Headquarters','HQ'),('North Campus','NC')])
     if c.execute('SELECT COUNT(*) n FROM asset_types').fetchone()['n']==0: c.executemany('INSERT INTO asset_types(name,code) VALUES(?,?)',[('Laptop (EMD)','EMD'),('Laptop (PMD)','PMD'),('Docking Station','DOCK'),('Monitor','MON'),('Mobile Phone','PHONE')])
     if c.execute('SELECT COUNT(*) n FROM users').fetchone()['n']==0:
         h=hashlib.sha256('admin123'.encode()).hexdigest(); tid=c.execute('SELECT id FROM teams LIMIT 1').fetchone()['id']; c.execute('INSERT INTO users(name,email,password,role,team_id,mfa) VALUES(?,?,?,?,?,?)',('Admin User','admin@example.com',h,'admin',tid,0))
@@ -61,13 +64,19 @@ class H(http.server.BaseHTTPRequestHandler):
             tr=''.join(f'<tr><td>{esc(r["employee"])}</td><td>{esc(r["team"])}</td><td>{esc(r["asset_type"])}</td><td>{"Yes" if r["has_asset"] else "No"}</td><td>{esc(r["make"])}</td><td>{esc(r["model"])}</td><td>{esc(r["serial_number"])}</td><td>{esc(r["asset_tag"])}</td></tr>' for r in rows)
             tsel=''.join(f'<option value="{t["id"]}" {"selected" if str(t["id"])==team_filter else ""}>{esc(t["name"])}</option>' for t in teams) if u['role']=='admin' else ''
             body=f'<div class="pagehead"><div><div class="eyebrow">ADMINISTRATION</div><h1>Asset register</h1><p class="muted">Review employee equipment and export a clean report.</p></div><div class="actions"><a class="button secondary" href="/export.csv">Export Excel-compatible CSV</a><button onclick="window.print()">Print / save PDF</button></div></div><section class="panel"><form class="filters"><label>Team<select name="team" onchange="this.form.submit()"><option value="">All teams</option>{tsel}</select></label><span class="count">{len(rows)} rows</span></form><div class="tablewrap"><table><thead><tr><th>Employee</th><th>Team</th><th>Asset</th><th>Has it?</th><th>Make</th><th>Model</th><th>Serial</th><th>Asset tag</th></tr></thead><tbody>{tr or "<tr><td colspan=8 class=empty>No submissions yet.</td></tr>"}</tbody></table></div></section>'
-            if u['role']=='admin': body += '<section class="panel admin-panel"><h2>Configurable asset types</h2><form method="post" action="/admin/type" class="inlineform"><input name="name" placeholder="e.g. Headset" required><input name="code" placeholder="Code" required><button>Add asset type</button></form><div class="chips">'+''.join(f'<span>{esc(a["name"])} <small>{esc(a["code"])}</small></span>' for a in c.execute('SELECT * FROM asset_types ORDER BY name'))+'</div></section>'
+            if u['role']=='admin':
+                asset_types='<section class="panel admin-panel"><h2>Asset types</h2><form method="post" action="/admin/type" class="inlineform"><input name="name" placeholder="e.g. Headset" required><input name="code" placeholder="Code" required><button>Add asset type</button></form><div class="chips">'+''.join(f'<span>{esc(a["name"])} <small>{esc(a["code"])}</small></span>' for a in c.execute('SELECT * FROM asset_types ORDER BY name'))+'</div></section>'
+                team_list='<section class="panel admin-panel"><h2>Teams</h2><form method="post" action="/admin/team" class="inlineform"><input name="name" placeholder="Team name" required><button>Add team</button></form><div class="chips">'+''.join(f'<span>{esc(t["name"])}</span>' for t in c.execute('SELECT * FROM teams ORDER BY name'))+'</div></section>'
+                building_list='<section class="panel admin-panel"><h2>Buildings</h2><form method="post" action="/admin/building" class="inlineform"><input name="name" placeholder="Building name" required><input name="code" placeholder="Code"><button>Add building</button></form><div class="chips">'+''.join(f'<span>{esc(b["name"])} <small>{esc(b["code"])}</small></span>' for b in c.execute('SELECT * FROM buildings ORDER BY name'))+'</div></section>'
+                people='<section class="panel admin-panel"><h2>Personnel</h2><form method="post" action="/admin/user" class="inlineform"><input name="name" placeholder="Full name" required><input name="email" type="email" placeholder="Email" required><input name="password" placeholder="Temporary password" required><select name="team_id">'+''.join(f'<option value="{t["id"]}">{esc(t["name"])}</option>' for t in teams)+'</select><select name="role"><option value="employee">Employee</option><option value="lead">Team Lead</option><option value="admin">Admin</option></select><button>Add person</button></form><div class="chips">'+''.join(f'<span>{esc(p["name"])} · {esc(c.execute("SELECT name FROM teams WHERE id=?",(p["team_id"],)).fetchone()["name"] if p["team_id"] else "No team")}</span>' for p in c.execute('SELECT * FROM users ORDER BY name'))+'</div></section>'
+                body += asset_types+team_list+building_list+people
             self.send(page('Admin',body,u)); return
-        types=c.execute('SELECT * FROM asset_types WHERE active=1 ORDER BY id').fetchall(); existing={r['asset_type_id']:r for r in c.execute('SELECT * FROM assets WHERE user_id=?',(u['id'],))}; team=c.execute('SELECT name FROM teams WHERE id=?',(u['team_id'],)).fetchone()['name']; cards=''
+        types=c.execute('SELECT * FROM asset_types WHERE active=1 ORDER BY id').fetchall(); existing={r['asset_type_id']:r for r in c.execute('SELECT * FROM assets WHERE user_id=?',(u['id'],))}; team=c.execute('SELECT name FROM teams WHERE id=?',(u['team_id'],)).fetchone()['name']; buildings=c.execute('SELECT * FROM buildings ORDER BY name').fetchall(); selected_buildings={r['building_id'] for r in c.execute('SELECT building_id FROM user_buildings WHERE user_id=?',(u['id'],))}; cards=''
         for a in types:
             x=existing.get(a['id']); yes=x and x['has_asset']; details=f'<div class="details" style="display:{"grid" if yes else "none"}"><input name="make_{a["id"]}" placeholder="Make" value="{esc(x["make"] if x else "")}"><input name="model_{a["id"]}" placeholder="Model" value="{esc(x["model"] if x else "")}"><input name="serial_{a["id"]}" placeholder="Serial number" value="{esc(x["serial_number"] if x else "")}"><input name="tag_{a["id"]}" placeholder="Asset tag" value="{esc(x["asset_tag"] if x else "")}"></div>'
             cards+=f'<article class="assetcard"><div><h3>{esc(a["name"])}</h3><p class="muted">Do you have this asset assigned to you?</p></div><div class="answer"><label><input type="radio" name="has_{a["id"]}" value="1" {"checked" if yes else ""} onchange="toggleDetails(this)"> Yes</label><label><input type="radio" name="has_{a["id"]}" value="0" {"checked" if not yes else ""} onchange="toggleDetails(this)"> No</label></div>{details}</article>'
-        body=f'<div class="pagehead"><div><div class="eyebrow">{esc(team).upper()} TEAM</div><h1>Your asset check-in</h1><p class="muted">Answer each question. Add identifying details when you have the asset.</p></div><span class="status">Autosave is off · submit when ready</span></div><form method="post" action="/save"><div class="assetgrid">{cards}</div><button class="save">Save asset record</button></form><script>function toggleDetails(el){{let card=el.closest(".assetcard"),d=card.querySelector(".details");if(d)d.style.display=el.value=="1"?"grid":"none";}}</script>'
+        building_form='<section class="panel building-select"><h2>Building access</h2><p class="muted">Select the buildings this employee is authorized to access.</p><div class="building-options">'+''.join(f'<label><input type="checkbox" name="building" value="{b["id"]}" {"checked" if b["id"] in selected_buildings else ""}> {esc(b["name"])} <small>{esc(b["code"])}</small></label>' for b in buildings)+'</div></section>'
+        body=f'<div class="pagehead"><div><div class="eyebrow">{esc(team).upper()} TEAM</div><h1>Your asset check-in</h1><p class="muted">Answer each question. Add identifying details when you have the asset.</p></div><span class="status">Autosave is off · submit when ready</span></div><form method="post" action="/save">{building_form}<div class="assetgrid">{cards}</div><button class="save">Save asset record</button></form><script>function toggleDetails(el){{let card=el.closest(".assetcard"),d=card.querySelector(".details");if(d)d.style.display=el.value=="1"?"grid":"none";}}</script>'
         self.send(page('My assets',body,u))
     def do_POST(self):
         path=urllib.parse.urlparse(self.path).path; f=self.form(); c=db()
@@ -78,11 +87,26 @@ class H(http.server.BaseHTTPRequestHandler):
         u=self.user()
         if not u: self.redirect('/login'); return
         if path=='/save':
+            c.execute('DELETE FROM user_buildings WHERE user_id=?',(u['id'],))
+            c.executemany('INSERT INTO user_buildings(user_id,building_id) VALUES(?,?)',[(u['id'],int(b)) for b in f.get('building',[])])
             for a in c.execute('SELECT * FROM asset_types WHERE active=1'):
                 has=int(f.get(f'has_{a["id"]}',['0'])[0]); vals=(u['id'],a['id'],has,f.get(f'make_{a["id"]}',[''])[0],f.get(f'model_{a["id"]}',[''])[0],f.get(f'serial_{a["id"]}',[''])[0],f.get(f'tag_{a["id"]}',[''])[0]); c.execute('''INSERT INTO assets(user_id,asset_type_id,has_asset,make,model,serial_number,asset_tag) VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,asset_type_id) DO UPDATE SET has_asset=excluded.has_asset,make=excluded.make,model=excluded.model,serial_number=excluded.serial_number,asset_tag=excluded.asset_tag,updated_at=CURRENT_TIMESTAMP''',vals)
             c.commit(); self.send(page('Saved','<section class="success"><div class="eyebrow">RECORD SAVED</div><h1>Thanks — your assets are up to date.</h1><p class="muted">Your team lead can now see the latest details in the register.</p><a class="button" href="/">Back to my assets</a></section>',u)); return
         if path=='/admin/type' and u['role']=='admin':
             try: c.execute('INSERT INTO asset_types(name,code) VALUES(?,?)',(f.get('name',[''])[0],f.get('code',[''])[0].upper())); c.commit()
+            except sqlite3.IntegrityError: pass
+            self.redirect('/admin'); return
+        if path=='/admin/team' and u['role']=='admin':
+            try: c.execute('INSERT INTO teams(name) VALUES(?)',(f.get('name',[''])[0],)); c.commit()
+            except sqlite3.IntegrityError: pass
+            self.redirect('/admin'); return
+        if path=='/admin/building' and u['role']=='admin':
+            try: c.execute('INSERT INTO buildings(name,code) VALUES(?,?)',(f.get('name',[''])[0],f.get('code',[''])[0].upper())); c.commit()
+            except sqlite3.IntegrityError: pass
+            self.redirect('/admin'); return
+        if path=='/admin/user' and u['role']=='admin':
+            try:
+                pw=hashlib.sha256(f.get('password',[''])[0].encode()).hexdigest(); c.execute('INSERT INTO users(name,email,password,role,team_id) VALUES(?,?,?,?,?)',(f.get('name',[''])[0],f.get('email',[''])[0].lower(),pw,f.get('role',['employee'])[0],f.get('team_id',[None])[0])); c.commit()
             except sqlite3.IntegrityError: pass
             self.redirect('/admin'); return
 

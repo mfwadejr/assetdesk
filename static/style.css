@@ -3,3 +3,4 @@
 :root{--ink:#1d1d1f;--muted:#6e6e73;--line:#e5e5ea;--paper:#f7f7f9;--card:#fff;--accent:#0071e3;--accent2:#e8f2ff;--shadow:0 18px 50px #1d1d1f12}
 body{background:var(--paper);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",sans-serif}
 header{background:#fff;color:var(--ink);border-bottom:1px solid var(--line);height:64px}.brand{color:var(--ink)}.brand span{color:var(--accent)}nav a{color:var(--accent)}.user{color:var(--muted)}
+.building-select{padding:22px;margin-bottom:16px}.building-options{display:flex;flex-wrap:wrap;gap:12px}.building-options label{display:flex;align-items:center;gap:7px;background:var(--accent2);padding:10px 13px;border-radius:10px}.building-options small{color:var(--muted)}
