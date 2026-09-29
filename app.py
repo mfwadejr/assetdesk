@@ -30,6 +30,7 @@ def init():
     xcols=[r['name'] for r in c.execute('PRAGMA table_info(assets)').fetchall()]
     if 'instances_json' not in xcols: c.execute('ALTER TABLE assets ADD COLUMN instances_json TEXT NOT NULL DEFAULT "[]"')
     if c.execute('SELECT COUNT(*) n FROM organizations').fetchone()['n']==0: c.execute('INSERT INTO organizations(name) VALUES(?)',('Default Organization',))
+    c.execute('UPDATE teams SET organization_id=(SELECT id FROM organizations ORDER BY id LIMIT 1) WHERE organization_id IS NULL')
     if c.execute('SELECT COUNT(*) n FROM teams').fetchone()['n']==0: c.executemany('INSERT INTO teams(name,organization_id) VALUES(?,1)',[('Operations',),('Engineering',),('Finance',),('People & Culture',)])
     if c.execute('SELECT COUNT(*) n FROM buildings').fetchone()['n']==0: c.executemany('INSERT INTO buildings(name,code) VALUES(?,?)',[('Headquarters','HQ'),('North Campus','NC')])
     if c.execute('SELECT COUNT(*) n FROM asset_types').fetchone()['n']==0: c.executemany('INSERT INTO asset_types(name,code) VALUES(?,?)',[('Laptop (EMD)','EMD'),('Laptop (PMD)','PMD'),('Docking Station','DOCK'),('Monitor','MON'),('Mobile Phone','PHONE')])
