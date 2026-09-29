@@ -22,6 +22,8 @@ def init():
     ''')
     cols=[r['name'] for r in c.execute('PRAGMA table_info(users)').fetchall()]
     if 'totp_secret' not in cols: c.execute('ALTER TABLE users ADD COLUMN totp_secret TEXT')
+    if 'delegated_admin' not in cols: c.execute('ALTER TABLE users ADD COLUMN delegated_admin INTEGER NOT NULL DEFAULT 0')
+    if 'view_only' not in cols: c.execute('ALTER TABLE users ADD COLUMN view_only INTEGER NOT NULL DEFAULT 0')
     if 'organization_id' not in cols: c.execute('ALTER TABLE users ADD COLUMN organization_id INTEGER REFERENCES organizations(id)')
     tcols=[r['name'] for r in c.execute('PRAGMA table_info(teams)').fetchall()]
     if 'organization_id' not in tcols: c.execute('ALTER TABLE teams ADD COLUMN organization_id INTEGER REFERENCES organizations(id)')
@@ -46,8 +48,9 @@ def totp(secret, counter=None):
 def valid_totp(secret, code): return any(hmac.compare_digest(totp(secret,int(time.time()//30)+i),code) for i in (-1,0,1))
 def page(title, body, user=None):
     nav = f'<span class="user">{esc(user["name"])} · {user["role"].title()}</span><a href="/logout">Log out</a>' if user else ''
-    admin = '<a href="/admin">Admin</a>' if user and user['role'] in ('admin','lead') else ''
-    return f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{esc(title)} · AssetDesk</title><link rel="stylesheet" href="/static/style.css"></head><body><header><a class="brand" href="/">ASSET<span>DESK</span><small>v{APP_VERSION}</small></a><nav>{admin}{nav}</nav></header><main>{body}</main><script>document.querySelectorAll('.rename-trigger').forEach(b=>b.textContent='Edit');</script></body></html>'''
+    admin = '<a href="/admin">Admin</a>' if user and (user['role'] in ('admin','lead','service_lead') or user['delegated_admin']) else ''
+    view = '<a href="/view">Review</a>' if user and (user['role']=='view' or user['view_only'] or admin) else ''
+    return f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{esc(title)} · AssetDesk</title><link rel="stylesheet" href="/static/style.css"></head><body><header><a class="brand" href="/">ASSET<span>DESK</span><small>v{APP_VERSION}</small></a><nav>{admin}{view}{nav}</nav></header><main>{body}</main><script>document.querySelectorAll('.rename-trigger').forEach(b=>b.textContent='Edit');</script></body></html>'''
 
 class H(http.server.BaseHTTPRequestHandler):
     def send(self, body, status=200, ctype='text/html; charset=utf-8', headers=None):
@@ -67,6 +70,11 @@ class H(http.server.BaseHTTPRequestHandler):
         if not u: self.redirect('/login'); return
         if path=='/export.csv':
             rows=c.execute('''SELECT u.name employee,t.name team,at.name asset_type,a.has_asset,a.make,a.model,a.serial_number,a.asset_tag FROM assets a JOIN users u ON u.id=a.user_id JOIN teams t ON t.id=u.team_id JOIN asset_types at ON at.id=a.asset_type_id ORDER BY t.name,u.name,at.name''').fetchall(); out=io.StringIO(); w=csv.writer(out); w.writerow(rows[0].keys() if rows else ['employee','team','asset_type','has_asset','make','model','serial_number','asset_tag']); [w.writerow(list(r)) for r in rows]; self.send(out.getvalue().encode(),ctype='text/csv',headers={'Content-Disposition':'attachment; filename=asset-register.csv'}); return
+        if path=='/view' and (u['role']=='view' or u['view_only'] or u['role'] in ('admin','lead','service_lead')):
+            rows=c.execute('''SELECT u.name employee,t.name team,at.name asset_type,a.has_asset,a.updated_at FROM assets a JOIN users u ON u.id=a.user_id JOIN teams t ON t.id=u.team_id JOIN asset_types at ON at.id=a.asset_type_id ORDER BY t.name,u.name,at.name''').fetchall()
+            tr=''.join(f'<tr><td>{esc(r["employee"])}</td><td>{esc(r["team"])}</td><td>{esc(r["asset_type"])}</td><td>{"Yes" if r["has_asset"] else "No"}</td><td>{esc(r["updated_at"] or "Never")}</td></tr>' for r in rows)
+            body='<div class="pagehead"><div><div class="eyebrow">READ-ONLY REVIEW</div><h1>Asset review</h1><p class="muted">View access cannot modify records.</p></div></div><section class="panel"><div class="tablewrap"><table><thead><tr><th>Employee</th><th>Team</th><th>Asset</th><th>Assigned</th><th>Last updated</th></tr></thead><tbody>'+ (tr or '<tr><td colspan="5" class="empty">No records.</td></tr>') +'</tbody></table></div></section>'
+            self.send(page('Review',body,u)); return
         if path=='/admin' and u['role'] in ('admin','lead','service_lead'):
             query=urllib.parse.parse_qs(p.query); team_filter=query.get('team',[''])[0]; employee_filter=query.get('employee',[''])[0]; search=query.get('q',[''])[0].strip(); teams=c.execute('SELECT * FROM teams ORDER BY name').fetchall(); employees=c.execute('SELECT id,name,team_id FROM users ORDER BY name').fetchall(); where=''; args=[]
             person_team=query.get('person_team',[''])[0]; person_role=query.get('person_role',[''])[0]; person_q=query.get('person_q',[''])[0].strip(); person_where=[]; person_args=[]
