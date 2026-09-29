@@ -108,6 +108,7 @@ document.querySelectorAll("select[name=role],select[name=person_role]").forEach(
   if(![...s.options].some(o=>o.value==="service_lead")){
     const o=document.createElement("option"); o.value="service_lead"; o.textContent="Service Line Lead"; s.appendChild(o);
   }
+  if(![...s.options].some(o=>o.value==="view")){ const o=document.createElement("option"); o.value="view"; o.textContent="View only"; s.appendChild(o); }
 });
 document.querySelectorAll(".rename-trigger").forEach(b=>{
   b.textContent="Edit";
@@ -120,6 +121,11 @@ document.querySelectorAll(".rename-trigger").forEach(b=>{
     form.action="/admin/team/update/"+b.dataset.id;
     document.getElementById("renameDialog").showModal();
   };
+});
+document.querySelectorAll('form[action="/admin/user"],form[action="/admin/user/update"]').forEach(form=>{
+  const box=document.createElement('div'); box.className='permission-grid';
+  box.innerHTML='<label><input type="checkbox" name="delegated_admin"> Delegated admin</label><label><input type="checkbox" name="view_only"> Read-only View</label>';
+  form.appendChild(box);
 });
 </script>'''
             self.send(page('Admin',body,u)); return
@@ -178,13 +184,14 @@ document.querySelectorAll(".rename-trigger").forEach(b=>{
             self.redirect('/admin'); return
         if path=='/admin/user' and u['role']=='admin':
             try:
-                pw=hashlib.sha256(f.get('password',[''])[0].encode()).hexdigest(); c.execute('INSERT INTO users(name,email,password,role,team_id) VALUES(?,?,?,?,?)',(f.get('name',[''])[0],f.get('email',[''])[0].lower(),pw,f.get('role',['employee'])[0],f.get('team_id',[None])[0])); c.commit()
+                pw=hashlib.sha256(f.get('password',[''])[0].encode()).hexdigest(); c.execute('INSERT INTO users(name,email,password,role,team_id,delegated_admin,view_only) VALUES(?,?,?,?,?,?,?)',(f.get('name',[''])[0],f.get('email',[''])[0].lower(),pw,f.get('role',['employee'])[0],f.get('team_id',[None])[0],1 if f.get('delegated_admin') else 0,1 if f.get('view_only') else 0)); c.commit()
             except sqlite3.IntegrityError: pass
             self.redirect('/admin'); return
         if path=='/admin/user/update' and u['role']=='admin':
             uid=f.get('id',[''])[0]; pw=f.get('password',[''])[0]
-            if pw: c.execute('UPDATE users SET name=?,email=?,team_id=?,role=?,password=? WHERE id=?',(f.get('name',[''])[0],f.get('email',[''])[0].lower(),f.get('team_id',[None])[0],f.get('role',['employee'])[0],hashlib.sha256(pw.encode()).hexdigest(),uid))
-            else: c.execute('UPDATE users SET name=?,email=?,team_id=?,role=? WHERE id=?',(f.get('name',[''])[0],f.get('email',[''])[0].lower(),f.get('team_id',[None])[0],f.get('role',['employee'])[0],uid))
+            flags=(1 if f.get('delegated_admin') else 0,1 if f.get('view_only') else 0)
+            if pw: c.execute('UPDATE users SET name=?,email=?,team_id=?,role=?,delegated_admin=?,view_only=?,password=? WHERE id=?',(f.get('name',[''])[0],f.get('email',[''])[0].lower(),f.get('team_id',[None])[0],f.get('role',['employee'])[0],*flags,hashlib.sha256(pw.encode()).hexdigest(),uid))
+            else: c.execute('UPDATE users SET name=?,email=?,team_id=?,role=?,delegated_admin=?,view_only=? WHERE id=?',(f.get('name',[''])[0],f.get('email',[''])[0].lower(),f.get('team_id',[None])[0],f.get('role',['employee'])[0],*flags,uid))
             c.commit(); self.redirect('/admin'); return
         if path.startswith('/admin/delete/') and u['role']=='admin':
             kind, ident = path.split('/')[-2:]
