@@ -3,6 +3,7 @@ from http import cookies
 
 ROOT = os.path.dirname(__file__)
 DB = os.environ.get('ASSETDESK_DB', os.path.join(ROOT, 'assets.sqlite3'))
+APP_VERSION = '0.0.9'
 SESSIONS = {}
 
 def db():
@@ -40,7 +41,7 @@ def valid_totp(secret, code): return any(hmac.compare_digest(totp(secret,int(tim
 def page(title, body, user=None):
     nav = f'<span class="user">{esc(user["name"])} · {user["role"].title()}</span><a href="/logout">Log out</a>' if user else ''
     admin = '<a href="/admin">Admin</a>' if user and user['role'] in ('admin','lead') else ''
-    return f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{esc(title)} · AssetDesk</title><link rel="stylesheet" href="/static/style.css"></head><body><header><a class="brand" href="/">ASSET<span>DESK</span></a><nav>{admin}{nav}</nav></header><main>{body}</main></body></html>'''
+    return f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{esc(title)} · AssetDesk</title><link rel="stylesheet" href="/static/style.css"></head><body><header><a class="brand" href="/">ASSET<span>DESK</span><small>v{APP_VERSION}</small></a><nav>{admin}{nav}</nav></header><main>{body}</main></body></html>'''
 
 class H(http.server.BaseHTTPRequestHandler):
     def send(self, body, status=200, ctype='text/html; charset=utf-8', headers=None):
